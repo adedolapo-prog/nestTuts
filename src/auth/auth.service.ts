@@ -3,12 +3,18 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { AuthDto } from './Dto';
 import * as argon from 'argon2';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private jwt: JwtService,
+    private config: ConfigService,
+  ) {}
 
-  async login(auth: AuthDto): Promise<any> {
+  async login(auth: AuthDto): Promise<{ access_token: string }> {
     try {
       const { email, password } = auth;
 
@@ -26,9 +32,8 @@ export class AuthService {
       //if wrong password, throw error
       if (!pwMatch) throw new ForbiddenException('Credentials incorrect');
 
-      //return user
-      user.hash = undefined;
-      return user;
+      const token = this.signToken(user.id, user.email);
+      return token;
     } catch (error) {
       if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
@@ -40,7 +45,7 @@ export class AuthService {
     }
   }
 
-  async signup(auth: AuthDto): Promise<any> {
+  async signup(auth: AuthDto): Promise<{ access_token: string }> {
     try {
       const { email, password } = auth;
       //generate our password hash
@@ -54,10 +59,7 @@ export class AuthService {
         },
       });
 
-      user.hash = undefined;
-
-      //return saved user
-      return user;
+      return this.signToken(user.id, user.email);
     } catch (error) {
       if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
@@ -67,5 +69,22 @@ export class AuthService {
 
       throw error;
     }
+  }
+
+  async signToken(
+    userId: number,
+    email: string,
+  ): Promise<{ access_token: string }> {
+    const payload = {
+      sub: userId,
+      email,
+    };
+
+    const token = await this.jwt.signAsync(payload, {
+      expiresIn: '15m',
+      secret: this.config.get('JWT_SECRET'),
+    });
+
+    return { access_token: token };
   }
 }
